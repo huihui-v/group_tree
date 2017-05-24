@@ -8,6 +8,7 @@ f = open("config.json", 'r+b')
 setting = json.load(f)
 host = setting['host']
 port = int(setting['port'])
+bind_port = random.randint(50000, 60000)
 RP = 0
 CON_STATUS = 0
 MAX_DEGREE = 2
@@ -72,20 +73,39 @@ def get_command():
 def handle_msg_for_RP(s):
     while 1:
         conn, addr = s.accept()
+        self_addr = conn.getsockname()
         recv_info = json.loads(conn.recv(1024))
         if recv_info['status'] == 'REQ':
             if recv_info['body'] == 'new_connection':
-                ack = pack('ACK', 'req_connection_recved', recv_info['targetip'], recv_info['targetport'], addr[0], addr[1])
+                ack = pack('ACK', 'req_connection_recved', self_addr[0], self_addr[1], addr[0], addr[1])
                 conn.sendall(ack)
                 if len(son_cons) < MAX_DEGREE:
                     new_conn = connect_to_new(recv_info['sourceip'], recv_info['sourceport'])
                     son_cons.append(new_conn);
                     son_addrs.append(new_conn.getsockname());
                 else:
-                    for i in len(son_cons):
+                    for i in range(0, len(son_cons)):
                         son_cons[i].sendall(json.dumps(recv_info));
             else:
                 print recv_info['body'];
+        elif recv_info['status'] == 'MSG':
+            ack = pack('ACK', 'send_msg_recved', self_addr[0], self_addr[1], addr[0], addr[1])
+            conn.sendall(ack)
+            if self_addr[0] == recv_info['targetip'] and str(self_addr[1]) == str(recv_info['targetport']):
+                print 'Message from '+recv_info['sourceip']+':'+str(recv_info['sourceport'])+' :'
+                print recv_info['body']
+                handle_reply(recv_info)
+            else:
+                for i in range(0, len(son_cons)):
+                    son_cons[i].sendall(json.dumps(recv_info));
+        elif recv_info['status'] == 'RPL':
+            reply_ack = pack('ACK', 'reply_msg_recved', self_addr[0], self_addr[1], addr[0], addr[1])
+            conn.sendall(reply_ack)
+            if self_addr[0] == recv_info['targetip'] and str(self_addr[1]) == str(recv_info['targetport']):
+                print 'Got confirm from target. Message transportation complete!'
+            else:
+                for i in range(0, len(son_cons)):
+                    son_cons[i].sendall(json.dumps(recv_info));
         else:
             print recv_info['status'];
 
@@ -93,6 +113,7 @@ def handle_msg_for_RP(s):
         continue;
 
 def handle_msg_for_normal_node(conn):
+    self_addr = conn.getsockname();
     while 1:
         recv_info = json.loads(conn.recv(1024))
         if recv_info['status'] == 'REQ':
@@ -102,10 +123,24 @@ def handle_msg_for_normal_node(conn):
                     son_cons.append(new_conn)
                     son_addrs.append(new_conn.getsockname())
                 else:
-                    for i in len(son_cons):
+                    for i in range(0, len(son_cons)):
                         son_cons[i].sendall(json.dumps(recv_info))
             else:
                 print recv_info['body'];
+        elif recv_info['status'] == 'MSG':
+            if self_addr[0] == recv_info['targetip'] and str(self_addr[1]) == str(recv_info['targetport']):
+                print 'Message from '+recv_info['sourceip']+':'+str(recv_info['sourceport'])+' :'
+                print recv_info['body']
+                handle_reply(recv_info)
+            else:
+                for i in range(0, len(son_cons)):
+                    son_cons[i].sendall(json.dumps(recv_info))
+        elif recv_info['status'] == 'RPL':
+            if self_addr[0] == recv_info['targetip'] and str(self_addr[1]) == str(recv_info['targetport']):
+                print 'Got confirm from target. Message transportation complete!'
+            else:
+                for i in range(0, len(son_cons)):
+                    son_cons[i].sendall(json.dumps(recv_info));
         else:
             print recv_info['status'];
 
@@ -121,7 +156,7 @@ def handle_connection(s):
         return;
     else:
         self_addr = s.getsockname()
-        bind_port = random.randint(50000, 60000)
+
         thread = threading.Thread(target=create_connection_with_father_node, args=(bind_port,))
         thread.start()
         package = pack("REQ", "new_connection", self_addr[0], bind_port, host, port)
@@ -129,7 +164,6 @@ def handle_connection(s):
         recv_info = json.loads(s.recv(1024))
         if recv_info['status'] == 'ACK' and recv_info['body'] == 'req_connection_recved':
             s.close()
-
 
 def wait_for_call_of_father_node(con_port):
     s = create_socket();
@@ -152,18 +186,43 @@ def create_connection_with_father_node(con_port):
 
 
 def handle_message(target, msg, s):
-    package = pack("""package for message""")
+    self_addr = s.getsockname()
+    package = pack("MSG", msg, self_addr[0], bind_port, target.split(':')[0], target.split(':')[1])
     if RP == 1:
         s.close();
-        for i in len(son_cons):
-            son_cons[i].sendall(package);
+        if self_addr[0] == target.split(':')[0] and str(self_addr[1]) == str(target.split(':')[1]):
+            print 'Message from '+recv_info['sourceip']+':'+str(recv_info['sourceport'])+' :'
+            print recv_info['body']
+            handle_reply(package)
+        else:
+            for i in range(0, len(son_cons)):
+                son_cons[i].sendall(package);
     else:
         s.sendall(package);
         recv_info = json.loads(s.recv(1024))
-        if """ack from RP confirming package pass""":
+        if recv_info['status'] == 'ACK' and recv_info['body'] == 'send_msg_recved':
+            s.close()
+
+
+def handle_reply(recv_info):
+    s = connect_or_bind()
+    self_addr = s.getsockname();
+    confirm_package = pack("RPL", "send_msg_confirm", recv_info['targetip'], recv_info['targetport'], recv_info['sourceip'], recv_info['sourceport'])
+    if RP == 1:
+        s.close();
+        if self_addr[0] == confirm_package['targetip'] and str(self_addr[1]) == str(confirm_package['targetport']):
+            print 'Got confirm from target. Message transportation complete!'
+        else:
+            for i in range(0, len(son_cons)):
+                son_cons[i].sendall(comfirm_package);
+    else:
+        s.sendall(confirm_package);
+        recv_info = json.loads(s.recv(1024))
+        if recv_info['status'] == 'ACK' and recv_info['body'] == 'reply_msg_recved':
             s.close()
 
 def index():
+    print 'Running on port' + str(bind_port)
     while 1:
         command = get_command();
         if (command[0] == 'connect'):
