@@ -35,6 +35,7 @@ def create_socket():
     return s;
 
 def connect_or_bind():
+    global RP
     s = create_socket();
     try:
         s.connect((host, port))
@@ -138,6 +139,7 @@ def wait_for_call_of_father_node(con_port):
     return s;
 
 def create_connection_with_father_node(con_port):
+    global CON_STATUS
     s = wait_for_call_of_father_node(con_port)
     while CON_STATUS != 1:
         conn, addr = s.accpet()
@@ -161,7 +163,7 @@ def handle_message(target, msg, s):
 
 def index():
     while 1:
-        command = get_command;
+        command = get_command();
         if (command[0] == 'connect'):
             s = connect_or_bind()
             handle_connection(s)
