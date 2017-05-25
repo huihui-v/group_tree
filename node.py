@@ -1,10 +1,11 @@
+# -*-coding: utf-8 -*-
 import socket
 import sys
 import json
 import random
 import threading
 
-f = open("config.json", 'r+b')
+f = open("/home/xingjf/桌面/py/group_tree/config.json", 'r+b')
 setting = json.load(f)
 host = setting['host']
 port = int(setting['port'])
@@ -33,7 +34,7 @@ def create_socket():
     except socket.error, msg:
         print 'FAILED to create socket. Error code: ' + str(msg[0]) + ', Error message: ' + msg[1]
         sys.exit()
-    print 'Socket Created'
+    #print 'Socket Created'
     return s;
 
 def connect_or_bind():
@@ -60,7 +61,7 @@ def connect_to_new(h, p):
     s = create_socket();
     try:
         s.connect((h, p))
-        print 'New node connected! '+ h + ':'+ str(p) + ';'
+        print 'New node trying to connect: '+ h + ':'+ str(p) + ';'
     except socket.error, msg:
         print 'FAILED to connect. Error code: ' + str(msg[0]) + ', Error message: ' + msg[1]
     return s;
@@ -83,7 +84,13 @@ def handle_msg_for_RP(s):
                     new_conn = connect_to_new(recv_info['sourceip'], recv_info['sourceport'])
                     son_cons.append(new_conn);
                     son_addrs.append(new_conn.getsockname());
+                    print new_conn.getsockname()
+                    print "Respond: Request of new connection from "+ recv_info['sourceip'] + ':' + str(recv_info['sourceport'])
                 else:
+                    if len(son_cons) == 0:
+                        print "Drop: Request of new connection from "+ recv_info['sourceip'] + ':' + str(recv_info['sourceport'])
+                    else:
+                        print "Pass: Request of new connection from "+ recv_info['sourceip'] + ':' + str(recv_info['sourceport'])
                     for i in range(0, len(son_cons)):
                         son_cons[i].sendall(json.dumps(recv_info));
             else:
@@ -96,6 +103,11 @@ def handle_msg_for_RP(s):
                 print recv_info['body']
                 handle_reply(recv_info)
             else:
+                if len(son_cons) == 0:
+
+                    print "Drop: Message from "+recv_info['sourceip']+':'+str(recv_info['sourceport'])+' to '+recv_info['targetip']+':'+str(recv_info['targetport'])
+                else:
+                    print "Pass: Message from "+recv_info['sourceip']+':'+str(recv_info['sourceport'])+' to '+recv_info['targetip']+':'+str(recv_info['targetport'])
                 for i in range(0, len(son_cons)):
                     son_cons[i].sendall(json.dumps(recv_info));
         elif recv_info['status'] == 'RPL':
@@ -104,6 +116,10 @@ def handle_msg_for_RP(s):
             if self_addr[0] == recv_info['targetip'] and str(self_addr[1]) == str(recv_info['targetport']):
                 print 'Got confirm from target. Message transportation complete!'
             else:
+                if len(son_cons) == 0:
+                    print "Drop: Reply from "+recv_info['sourceip']+':'+str(recv_info['sourceport'])+' to '+recv_info['targetip']+':'+str(recv_info['targetport'])
+                else:
+                    print "Pass: Reply from "+recv_info['sourceip']+':'+str(recv_info['sourceport'])+' to '+recv_info['targetip']+':'+str(recv_info['targetport'])
                 for i in range(0, len(son_cons)):
                     son_cons[i].sendall(json.dumps(recv_info));
         else:
@@ -112,17 +128,27 @@ def handle_msg_for_RP(s):
         """something that handle the message that received from all nodes"""
         continue;
 
-def handle_msg_for_normal_node(conn):
+def handle_msg_for_normal_node(conn, addr):
     self_addr = conn.getsockname();
+    reply_ack = pack("RPL", "new_connection_confirm", self_addr[0], self_addr[1], addr[0], addr[1])
+    conn.sendall(reply_ack)
     while 1:
         recv_info = json.loads(conn.recv(1024))
         if recv_info['status'] == 'REQ':
             if recv_info['body'] == 'new_connection':
                 if len(son_cons) < MAX_DEGREE:
                     new_conn = connect_to_new(recv_info['sourceip'], recv_info['sourceport'])
-                    son_cons.append(new_conn)
-                    son_addrs.append(new_conn.getsockname())
+                    recv_info_conn = json.loads(new_conn.recv(1024))
+                    if recv_info_conn['status'] == "RPL" and recv_info_conn['body'] == 'new_connection_confirm':
+                        son_cons.append(new_conn)
+                        son_addrs.append(new_conn.getsockname())
+                        print new_conn.getsockname()
+                        print "Respond: Request of new connection from "+ recv_info['sourceip'] + ':' + str(recv_info['sourceport'])
                 else:
+                    if len(son_cons) == 0:
+                        print "Drop: Request of new connection from "+ recv_info['sourceip'] + ':' + str(recv_info['sourceport'])
+                    else:
+                        print "Pass: Request of new connection from "+ recv_info['sourceip'] + ':' + str(recv_info['sourceport'])
                     for i in range(0, len(son_cons)):
                         son_cons[i].sendall(json.dumps(recv_info))
             else:
@@ -133,12 +159,20 @@ def handle_msg_for_normal_node(conn):
                 print recv_info['body']
                 handle_reply(recv_info)
             else:
+                if len(son_cons) == 0:
+                    print "Drop: Message from "+recv_info['sourceip']+':'+str(recv_info['sourceport'])+' to '+recv_info['targetip']+':'+str(recv_info['targetport'])
+                else:
+                    print "Pass: Message from "+recv_info['sourceip']+':'+str(recv_info['sourceport'])+' to '+recv_info['targetip']+':'+str(recv_info['targetport'])
                 for i in range(0, len(son_cons)):
                     son_cons[i].sendall(json.dumps(recv_info))
         elif recv_info['status'] == 'RPL':
             if self_addr[0] == recv_info['targetip'] and str(self_addr[1]) == str(recv_info['targetport']):
                 print 'Got confirm from target. Message transportation complete!'
             else:
+                if len(son_cons) == 0:
+                    print "Drop: Reply from "+recv_info['sourceip']+':'+str(recv_info['sourceport'])+' to '+recv_info['targetip']+':'+str(recv_info['targetport'])
+                else:
+                    print "Pass: Reply from "+recv_info['sourceip']+':'+str(recv_info['sourceport'])+' to '+recv_info['targetip']+':'+str(recv_info['targetport'])
                 for i in range(0, len(son_cons)):
                     son_cons[i].sendall(json.dumps(recv_info));
         else:
@@ -169,8 +203,8 @@ def wait_for_call_of_father_node(con_port):
     s = create_socket();
     try:
         s.bind(('', con_port))
-        s.listen(10)
-        print 'socket with father node now listening...'
+        s.listen(1)
+        print 'Listening from father node'
     except socket.error, msg:
         print 'FAILED to bind socket. Error code: ' + str(msg[0]) + ', Error message: ' + msg[1]
     return s;
@@ -178,10 +212,10 @@ def wait_for_call_of_father_node(con_port):
 def create_connection_with_father_node(con_port):
     global CON_STATUS
     s = wait_for_call_of_father_node(con_port)
-    while CON_STATUS != 1:
+    if CON_STATUS == 0:
         conn, addr = s.accept()
-        CON_STATUS = 1
-    handle_msg_for_normal_node(conn)
+        CON_STATUS = CON_STATUS + 1
+    handle_msg_for_normal_node(conn, addr)
     return;
 
 
@@ -222,7 +256,7 @@ def handle_reply(recv_info):
             s.close()
 
 def index():
-    print 'Running on port' + str(bind_port)
+    print 'Running on port: ' + str(bind_port)
     while 1:
         command = get_command();
         if (command[0] == 'connect'):
