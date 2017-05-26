@@ -42,6 +42,7 @@ def connect_or_bind():
     s = create_socket();
     try:
         s.connect((host, port))
+        s.settimeout(5)
         print 'Connected to server!'
     except socket.error, msg:
         print 'FAILED to connect. Error code: ' + str(msg[0]) + ', Error message: ' + msg[1]
@@ -60,10 +61,17 @@ def connect_or_bind():
 def connect_to_new(h, p):
     s = create_socket();
     try:
+        s.settimeout(5)
         s.connect((h, p))
+        #s.setblocking(0)
+
         print 'New node trying to connect: '+ h + ':'+ str(p) + ';'
     except socket.error, msg:
-        print 'FAILED to connect. Error code: ' + str(msg[0]) + ', Error message: ' + msg[1]
+        print msg
+        #if len(msg) != 2:
+        #    print msg
+        #else:
+        #    print 'FAILED to connect to new node. Error code: ' + str(msg[0]) + ', Error message: ' + msg[1]
     return s;
 
 def get_command():
@@ -84,13 +92,10 @@ def handle_msg_for_RP(s):
                     new_conn = connect_to_new(recv_info['sourceip'], recv_info['sourceport'])
                     son_cons.append(new_conn);
                     son_addrs.append(new_conn.getsockname());
-                    print new_conn.getsockname()
+                    #print new_conn.getsockname()
                     print "Respond: Request of new connection from "+ recv_info['sourceip'] + ':' + str(recv_info['sourceport'])
                 else:
-                    if len(son_cons) == 0:
-                        print "Drop: Request of new connection from "+ recv_info['sourceip'] + ':' + str(recv_info['sourceport'])
-                    else:
-                        print "Pass: Request of new connection from "+ recv_info['sourceip'] + ':' + str(recv_info['sourceport'])
+                    print "Pass: Request of new connection from "+ recv_info['sourceip'] + ':' + str(recv_info['sourceport'])
                     for i in range(0, len(son_cons)):
                         son_cons[i].sendall(json.dumps(recv_info));
             else:
@@ -134,21 +139,25 @@ def handle_msg_for_normal_node(conn, addr):
     conn.sendall(reply_ack)
     while 1:
         recv_info = json.loads(conn.recv(1024))
+        print recv_info
         if recv_info['status'] == 'REQ':
             if recv_info['body'] == 'new_connection':
                 if len(son_cons) < MAX_DEGREE:
+                    print 'before new conn'
                     new_conn = connect_to_new(recv_info['sourceip'], recv_info['sourceport'])
-                    recv_info_conn = json.loads(new_conn.recv(1024))
+                    print 'after new conn'
+                    try:
+                        recv_info_conn = json.loads(new_conn.recv(1024))
+                    except socket.error, msg:
+                        print msg
+                        continue;
                     if recv_info_conn['status'] == "RPL" and recv_info_conn['body'] == 'new_connection_confirm':
                         son_cons.append(new_conn)
                         son_addrs.append(new_conn.getsockname())
-                        print new_conn.getsockname()
+                        #print new_conn.getsockname()
                         print "Respond: Request of new connection from "+ recv_info['sourceip'] + ':' + str(recv_info['sourceport'])
                 else:
-                    if len(son_cons) == 0:
-                        print "Drop: Request of new connection from "+ recv_info['sourceip'] + ':' + str(recv_info['sourceport'])
-                    else:
-                        print "Pass: Request of new connection from "+ recv_info['sourceip'] + ':' + str(recv_info['sourceport'])
+                    print "Pass: Request of new connection from "+ recv_info['sourceip'] + ':' + str(recv_info['sourceport'])
                     for i in range(0, len(son_cons)):
                         son_cons[i].sendall(json.dumps(recv_info))
             else:
@@ -203,7 +212,8 @@ def wait_for_call_of_father_node(con_port):
     s = create_socket();
     try:
         s.bind(('', con_port))
-        s.listen(1)
+        s.settimeout(5)
+        s.listen(0)
         print 'Listening from father node'
     except socket.error, msg:
         print 'FAILED to bind socket. Error code: ' + str(msg[0]) + ', Error message: ' + msg[1]
